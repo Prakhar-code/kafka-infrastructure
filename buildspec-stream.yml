@@ -1,0 +1,60 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    commands:
+      - yum update -y
+      - yum install -y yum-utils
+      - yum-config-manager --add-repo https://packages.confluent.io/rpm/7.5/confluent.repo
+      - rpm --import https://packages.confluent.io/rpm/7.5/archive.key
+      - yum clean all && yum makecache
+      - yum groupinstall -y "Development Tools"
+      - yum install -y python3-devel cyrus-sasl-devel openssl-devel
+      # Install librdkafka from source since package install is failing
+      - curl -L https://github.com/edenhill/librdkafka/archive/refs/tags/v2.3.0.tar.gz -o librdkafka.tar.gz
+      - tar xf librdkafka.tar.gz
+      - cd librdkafka-2.3.0
+      - ./configure
+      - make
+      - make install
+      - cd ..
+      - rm -rf librdkafka-2.3.0 librdkafka.tar.gz
+      - ldconfig
+
+  pre_build:
+    commands:
+      - export CFLAGS="-I/usr/local/include/librdkafka"
+      - export LDFLAGS="-L/usr/local/lib"
+      - export LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH:-}"
+      - echo Logging in to Amazon ECR...
+      - aws --version
+      - docker --version
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+
+  build:
+    commands:
+      - pip install --upgrade pip
+      - pip install -r requirements.txt
+      - echo Build started on `date`
+      - echo Building the Docker image...
+      - docker build -f docker-stream -t $IMAGE_REPO:latest .
+      - docker tag $IMAGE_REPO:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO:$IMAGE_TAG
+
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing the Docker image to ECR...
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO:$IMAGE_TAG
+      - printf '[{"name":"kafka_stream","imageUri":"%s"}]' $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO:$IMAGE_TAG > imagedefinitions.json
+      - cat imagedefinitions.json
+
+      
+artifacts:
+  files:
+    - '**/*'
+
+cache:
+  paths:
+    - '/root/.cache/pip/**/*'

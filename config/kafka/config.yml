@@ -1,0 +1,5 @@
+bootstrap_servers: "localhost:9092"
+group_id: "stock_enrichment_group"
+topics:
+  input: ["large_cap_topic", "mid_cap_topic", "small_cap_topic"]
+  output: "enriched_stock_topic"
